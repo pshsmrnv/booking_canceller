@@ -1,5 +1,8 @@
 import logging
 import asyncio
+import pandas as pd
+import joblib
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils import executor
@@ -20,6 +23,8 @@ dp = Dispatcher(bot)
 keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 button_start = KeyboardButton("/start")
 button_help = KeyboardButton("/help")
+current_index = 0 # Индекс текущей строки в данных
+
 # Создаем reply-кнопки
 
 def get_main_menu():
@@ -67,7 +72,7 @@ def get_full_stat():
     return keyboard
 
 
-# Обработчики для кнопок, теперь обрабатываем текст сообщений
+
 
 @dp.message_handler(lambda message: message.text == "Профиль отеля")
 async def process_profile(message: types.Message):
@@ -110,14 +115,33 @@ async def process_call_client(message: types.Message):
 async def process_main_menu(message: types.Message):
     await message.reply("Вы вернулись в главное меню.", reply_markup=get_reply_keyboard())
 
-# Функция отправки сообщения каждые 3 минут
+def get_next_row():
+    data = pd.read_csv('data.csv')
+    global current_index
+    if current_index < len(data):
+        row = data.iloc[current_index].values.reshape(1, -1)
+        current_index += 1
+        return row
+    else:
+        return None  # или другое значение, если строки закончились
+
+async def model_predict(row):
+    loaded_model = joblib.load('random_forest_model.pkl')
+    prediction = loaded_model.predict_proba(row)[:, 1][0].round(2)
+    return f"Предсказание об отмене брони: {prediction}"
+
 async def new_booking(user_id):
     while True:
         try:
-            await bot.send_message(user_id, "Поступила новая бронь", reply_markup=get_reply_keyboard())
+            row = get_next_row()
+            if row is not None:
+                prediction = await model_predict(row)
+                await bot.send_message(user_id, f"Поступила новая бронь: {prediction}", reply_markup=get_reply_keyboard())
+            else:
+                logging.info("Строки закончились.")
         except Exception as e:
             logging.error(f"Ошибка отправки сообщения: {e}")
-        await asyncio.sleep(180)  # Задержка в 3 минуты (180 секунд)
+        await asyncio.sleep(30)  # Задержка в 3 минуты (180 секунд)
 
 # Обработчик команды /start
 @dp.message_handler(commands=['start'])
